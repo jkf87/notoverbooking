@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>예약 테이블</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <style>
+        /* 필요한 경우 추가 스타일 */
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+    <div class="container mx-auto">
+        <div class="bg-white shadow-lg rounded-lg p-8">
+            <div class="flex flex-col space-y-4">
+                <h1 class="text-xl font-semibold text-gray-800">예약 테이블 (월요일부터 금요일까지)</h1>
+                <div id="reservationTable" class="grid grid-cols-7 gap-4">
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 파이어베이스 초기화
+        const firebaseConfig = {
+        apiKey: "AIzaSyDGi5gGCVTrLuPmnlfgoi8hsK8LLTx7CLk",
+        authDomain: "notoverbooking-sy.firebaseapp.com",
+        projectId: "notoverbooking-sy",
+        storageBucket: "notoverbooking-sy.appspot.com",
+        messagingSenderId: "769717284111",
+        appId: "1:769717284111:web:ffac066e44b7d45c01627a",
+        measurementId: "G-FJM1W9ZNDS"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // 예약 로직을 처리하는 JavaScript
+        const reservationTable = document.getElementById('reservationTable');
+        const days = ['월요일', '화요일', '수요일', '목요일', '금요일'];
+        const times = ['1교시 (8:40)', '2교시 (9:30)', '3교시 (10:20)', '4교시 (11:10)', '5교시 (11:50)', '6교시 (13:10)'];
+
+        // 예약 목록을 저장할 배열
+        let reservationList = [];
+
+        // 예약 목록을 복원하는 함수
+        function restoreReservationList() {
+            const reservationListRef = database.ref('reservationList');
+            reservationListRef.on('value', (snapshot) => {
+                reservationList = snapshot.val() || [];
+                // 모든 시간 슬롯을 초기화하고 새 예약 목록으로 업데이트
+                const timeSlots = reservationTable.getElementsByClassName('time-slot');
+                for (let slot of timeSlots) {
+                    slot.classList.remove('bg-green-200');
+                    slot.textContent = slot.dataset.time;
+                    delete slot.dataset.password;
+                }
+
+                reservationList.forEach(reservation => {
+                    const { day, time, name, password } = reservation;
+                    const timeSlot = getTimeSlot(day, time);
+                    if (timeSlot) {
+                        timeSlot.classList.add('bg-green-200');
+                        timeSlot.textContent = `${timeSlot.dataset.time} - 예약됨 (${name})`;
+                        timeSlot.dataset.password = password; // 비밀번호 저장
+                    }
+                });
+            });
+        }
+
+
+        // 예약 목록을 저장하는 함수
+        function saveReservationList() {
+            const reservationListRef = database.ref('reservationList');
+            reservationListRef.set(reservationList, (error) => {
+                if (error) {
+                    console.error('데이터 저장 실패:', error);
+                } else {
+                    updateReservationListOnClient();
+                }
+            });
+        }
+
+        // 클라이언트 측에서 예약 목록을 업데이트하는 함수
+        function updateReservationListOnClient() {
+            reservationList.forEach(reservation => {
+                const { day, time, name } = reservation;
+                const timeSlot = getTimeSlot(day, time);
+                if (timeSlot) {
+                    if (name) {
+                        reserveTimeSlot(timeSlot, name);
+                    } else {
+                        // 예약 취소 시 시간 슬롯을 원래 상태로 되돌림
+                        timeSlot.classList.remove('bg-green-200');
+                        timeSlot.textContent = timeSlot.dataset.time;
+                    }
+                }
+            });
+        }
+
+        // 예약된 시간 슬롯을 가져오는 함수
+        function getTimeSlot(day, time) {
+            const timeSlots = reservationTable.getElementsByClassName('time-slot');
+            for (let i = 0; i < timeSlots.length; i++) {
+                const timeSlot = timeSlots[i];
+                if (timeSlot.dataset.day === day && timeSlot.dataset.time === time) {
+                    return timeSlot;
+                }
+            }
+            return null;
+        }
+
+        // Base64로 비밀번호 인코딩
+        function encodePassword(password) {
+            return btoa(password);
+        }
+
+        // Base64로 비밀번호 디코딩
+        function decodePassword(encodedPassword) {
+            return atob(encodedPassword);
+        }
+
+         // 예약 시간 슬롯을 예약 또는 취소하는 함수
+        function toggleReservation(slot) {
+            if (slot.classList.contains('bg-green-200')) {
+                const inputPassword = prompt('예약을 취소하기 위해 비밀번호를 입력하세요:');
+                const reservation = reservationList.find(res => res.day === slot.dataset.day && res.time === slot.dataset.time);
+                if (reservation && inputPassword && encodePassword(inputPassword) === reservation.password) {
+                    slot.classList.remove('bg-green-200');
+                    slot.textContent = slot.dataset.time;
+                    reservationList = reservationList.filter(res => res !== reservation);
+                    saveReservationList();
+                } else {
+                    alert('비밀번호가 올바르지 않습니다.');
+                }
+            } else {
+                const newPassword = prompt('이 예약에 사용할 비밀번호를 설정하세요:');
+                if (newPassword) {
+                    const encodedPassword = encodePassword(newPassword);
+                    const name = prompt('예약자 이름을 입력하세요:');
+                    if (name) {
+                        slot.classList.add('bg-green-200');
+                        slot.textContent = `${slot.dataset.time} - 예약됨 (${name})`;
+                        const day = slot.dataset.day;
+                        const time = slot.dataset.time;
+                        const newReservation = { day, time, name, password: encodedPassword };
+                        reservationList.push(newReservation);
+                        saveReservationList();
+                    }
+                }
+            }
+        }
+
+        // Firebase에 예약 목록을 저장하는 함수
+        function saveReservationList() {
+            const reservationListRef = database.ref('reservationList');
+            reservationListRef.set(reservationList, (error) => {
+                if (error) {
+                    console.error('데이터 저장 실패:', error);
+                }
+            });
+        }
+
+
+        // 예약 시간 슬롯을 생성하는 함수
+        function createTimeSlots() {
+            days.forEach(day => {
+              const daySlot = document.createElement('div');
+              daySlot.classList.add('bg-gray-200', 'p-4');
+              daySlot.textContent = day;
+              reservationTable.appendChild(daySlot);
+                times.forEach(time => {
+                    const timeSlot = document.createElement('div');
+                    timeSlot.classList.add('p-4', 'border', 'rounded', 'text-center', 'cursor-pointer', 'hover:bg-gray-200', 'time-slot');
+                    timeSlot.textContent = time;
+                    timeSlot.dataset.day = day;
+                    timeSlot.dataset.time = time;
+                    timeSlot.addEventListener('click', () => toggleReservation(timeSlot));
+                    reservationTable.appendChild(timeSlot);
+                });
+            });
+        }
+
+        // 페이지 로드 시 예약 목록을 복원하고 시간 슬롯을 생성
+        document.addEventListener('DOMContentLoaded', () => {
+            restoreReservationList();
+            createTimeSlots();
+        });
+
+        // 실시간으로 예약 목록을 반영하는 함수
+        function reserveTimeSlot(slot, name) {
+            slot.classList.add('bg-green-200');
+            slot.textContent = `${slot.dataset.time} - 예약됨 (${name})`;
+        }
+
+        function updateReservationList(snapshot) {
+            reservationList = snapshot.val() || [];
+            // 모든 시간 슬롯을 기본 상태로 초기화
+            const timeSlots = reservationTable.getElementsByClassName('time-slot');
+            for (let slot of timeSlots) {
+                slot.classList.remove('bg-green-200');
+                slot.textContent = slot.dataset.time;
+            }
+
+            // 예약 목록에 따라 시간 슬롯을 업데이트
+            reservationList.forEach(reservation => {
+                const { day, time, name } = reservation;
+                const timeSlot = getTimeSlot(day, time);
+                if (timeSlot) {
+                    reserveTimeSlot(timeSlot, name);
+                }
+            });
+        }
+
+        // 실시간으로 예약 목록을 감시하는 함수
+        function watchReservationList() {
+            const reservationListRef = database.ref('reservationList');
+            reservationListRef.on('value', updateReservationList);
+        }
+
+        // 페이지 로드 시 예약 목록을 감시
+        document.addEventListener('DOMContentLoaded', watchReservationList);
+    </script>
+</body>
+</html>
